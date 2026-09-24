@@ -1,0 +1,199 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as http from 'node:http';
+import { AddressInfo } from 'node:net';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { createHttpServer } from '../../src/mcp/http.js';
+
+describe('MCP Client Integration Test', () => {
+  let server: http.Server;
+  let serverPort: number;
+  let serverUrl: string;
+
+  beforeAll(async () => {
+    // 1. Start actual Digital Janitor HTTP MCP server on ephemeral test port (port 0)
+    server = await createHttpServer(0);
+    const addr = server.address() as AddressInfo;
+    serverPort = addr.port;
+    serverUrl = `http://localhost:${serverPort}/mcp`;
+  });
+
+  afterAll(async () => {
+    // 14. Shut down the HTTP server & 15. Ensure no background process remains
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  it('connects via real StreamableHTTPClientTransport, negotiates, lists tools, and executes health_check', async () => {
+    // 2. Create a real MCP Client from @modelcontextprotocol/client
+    const client = new Client(
+      {
+        name: 'digital-janitor-integration-tester',
+        version: '0.1.0',
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    // 3. Create StreamableHTTPClientTransport pointing to http://localhost:<test-port>/mcp
+    // 4. Connect to http://localhost:<test-port>/mcp
+    const transport = new StreamableHTTPClientTransport(new URL(serverUrl));
+
+    // 5. Allow normal SDK negotiation behavior (no hard-coded obsolete version or manual JSON-RPC initialize)
+    await client.connect(transport);
+
+    // 9. Call listTools() through MCP client
+    const toolsResult = await client.listTools();
+
+    // 10. Verify health_check and scan_files exist
+    const toolNames = toolsResult.tools.map((t) => t.name);
+    expect(toolNames).toContain('health_check');
+    expect(toolNames).toContain('scan_files');
+
+    const healthCheckTool = toolsResult.tools.find((t) => t.name === 'health_check');
+    expect(healthCheckTool).toBeDefined();
+    expect(healthCheckTool?.name).toBe('health_check');
+    expect(healthCheckTool?.description).toBe(
+      'Returns the health status of the Digital Janitor MCP server.',
+    );
+
+    const scanFilesTool = toolsResult.tools.find((t) => t.name === 'scan_files');
+    expect(scanFilesTool).toBeDefined();
+    expect(scanFilesTool?.name).toBe('scan_files');
+    expect(scanFilesTool?.description).toBe(
+      'Performs a safe, read-only filesystem discovery scan under the specified root directory.',
+    );
+
+    // 11. Call health_check through MCP client
+    const callResult = await client.callTool({
+      name: 'health_check',
+      arguments: {},
+    });
+
+    // 12. Verify returned result contains expected status/service/version
+    expect(callResult).toBeDefined();
+    expect(callResult.content).toBeDefined();
+    expect(Array.isArray(callResult.content)).toBe(true);
+    expect(callResult.content.length).toBeGreaterThan(0);
+
+    const firstContent = callResult.content[0] as { type: string; text: string };
+    expect(firstContent.type).toBe('text');
+
+    const parsed = JSON.parse(firstContent.text);
+    expect(parsed).toEqual({
+      status: 'ok',
+      service: 'digital-janitor-mcp',
+      version: '0.1.0',
+    });
+
+    // Test scan_files MCP tool over the real HTTP connection
+    const os = await import('node:os');
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+
+    const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-tool-fixture-'));
+    const testFile = path.join(fixtureDir, 'sample.txt');
+    await fs.writeFile(testFile, 'hello world content');
+
+    try {
+      const scanResult = await client.callTool({
+        name: 'scan_files',
+        arguments: {
+          rootPath: fixtureDir,
+          maxDepth: 2,
+          maxResults: 50,
+        },
+      });
+
+      expect(scanResult.isError).toBeFalsy();
+      expect(scanResult.content).toBeDefined();
+      const content = scanResult.content[0] as { type: string; text: string };
+      expect(content.type).toBe('text');
+
+      const parsedScan = JSON.parse(content.text);
+      expect(parsedScan.rootPath).toBe(path.resolve(fixtureDir));
+      expect(parsedScan.truncated).toBe(false);
+      expect(parsedScan.totalEntries).toBeGreaterThanOrEqual(1);
+
+      const sampleEntry = parsedScan.entries.find(
+        (e: { relativePath: string }) => e.relativePath === 'sample.txt',
+      );
+      expect(sampleEntry).toBeDefined();
+      expect(sampleEntry.type).toBe('file');
+      expect(sampleEntry.sizeBytes).toBe('hello world content'.length);
+      expect(sampleEntry.extension).toBe('.txt');
+      expect(sampleEntry.modifiedAt).toBeDefined();
+    } finally {
+      await fs.rm(fixtureDir, { recursive: true, force: true });
+    }
+
+    // 13. Close the MCP client
+    await client.close();
+  });
+
+  it('rejects unauthorized Host header for DNS rebinding protection', async () => {
+    const res = await new Promise<{ statusCode?: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: serverPort,
+          path: '/mcp',
+          method: 'POST',
+          headers: {
+            Host: 'unauthorized-external-domain.com',
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/event-stream',
+          },
+        },
+        (response) => {
+          let data = '';
+          response.on('data', (chunk) => (data += chunk));
+          response.on('end', () => resolve({ statusCode: response.statusCode, body: data }));
+        },
+      );
+      req.on('error', reject);
+      req.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+      req.end();
+    });
+
+    expect(res.statusCode).toBe(403);
+    const parsed = JSON.parse(res.body);
+    expect(parsed.error.code).toBe(-32000);
+    expect(parsed.error.message).toContain('Invalid Host');
+  });
+
+  it('rejects untrusted Origin header', async () => {
+    const res = await fetch(serverUrl, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://malicious-site.example',
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: number; message: string } };
+    expect(body.error.code).toBe(-32000);
+    expect(body.error.message).toContain('Invalid Origin');
+  });
+
+  it('allows trusted Origin and echoes only that origin without wildcard *', async () => {
+    const res = await fetch(serverUrl, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://localhost:3000',
+        'Access-Control-Request-Method': 'POST',
+      },
+    });
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
+    expect(res.headers.get('access-control-allow-origin')).not.toBe('*');
+  });
+});

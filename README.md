@@ -4,11 +4,11 @@ Digital Janitor is an automated maintenance and hygiene framework designed to sc
 
 ## Current Project Status
 
-- **Status**: Foundation / Scaffolding Phase
-- **MCP Server Implementation**: **NOT started yet**
+- **Status**: Minimal MCP Server Phase
+- **MCP Server Implementation**: **Basic Streamable HTTP endpoint implemented**
 - **TrueForge Integration**: **NOT started yet**
 - **TrueFoundry Integration**: **NOT started yet**
-- **Business Logic**: **NOT started yet**
+- **Business Logic / Cleanups**: **NOT started yet**
 
 The repository currently contains the TypeScript foundation, directory skeleton, strict type configuration, linting, formatting, and testing harness.
 
@@ -81,3 +81,45 @@ npm install
   ```bash
   npm run format:check
   ```
+
+### Running the Server
+
+To start the development server with live reload:
+
+```bash
+npm run dev
+```
+
+To run the production build:
+
+```bash
+npm run build
+npm start
+```
+
+**Default port**: `8000` (can be changed via `PORT` environment variable).
+**MCP Endpoint**: `POST /mcp`
+
+The server exposes one simple diagnostic tool named `health_check` which returns `{ "status": "ok", "service": "digital-janitor-mcp", "version": "0.1.0" }`.
+
+#### Testing the Server
+
+You can send a basic MCP initialization request via `curl`:
+
+```bash
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": { "name": "curl-test", "version": "1.0" }
+    }
+  }'
+```
+
+_Note: Explicitly, real cleanup functionality does not exist yet. No filesystem access, docker commands, or dependencies are affected. TrueForge has not been connected yet._
