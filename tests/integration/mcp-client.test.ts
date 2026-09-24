@@ -49,10 +49,11 @@ describe('MCP Client Integration Test', () => {
     // 9. Call listTools() through MCP client
     const toolsResult = await client.listTools();
 
-    // 10. Verify health_check and scan_files exist
+    // 10. Verify health_check, scan_files, and scan_git_repository exist
     const toolNames = toolsResult.tools.map((t) => t.name);
     expect(toolNames).toContain('health_check');
     expect(toolNames).toContain('scan_files');
+    expect(toolNames).toContain('scan_git_repository');
 
     const healthCheckTool = toolsResult.tools.find((t) => t.name === 'health_check');
     expect(healthCheckTool).toBeDefined();
@@ -66,6 +67,13 @@ describe('MCP Client Integration Test', () => {
     expect(scanFilesTool?.name).toBe('scan_files');
     expect(scanFilesTool?.description).toBe(
       'Performs a safe, read-only filesystem discovery scan under the specified root directory.',
+    );
+
+    const scanGitTool = toolsResult.tools.find((t) => t.name === 'scan_git_repository');
+    expect(scanGitTool).toBeDefined();
+    expect(scanGitTool?.name).toBe('scan_git_repository');
+    expect(scanGitTool?.description).toBe(
+      'Performs a safe, read-only inspection of a Git repository, collecting branch, commit, and object storage metrics.',
     );
 
     // 11. Call health_check through MCP client
@@ -99,6 +107,19 @@ describe('MCP Client Integration Test', () => {
     const testFile = path.join(fixtureDir, 'sample.txt');
     await fs.writeFile(testFile, 'hello world content');
 
+    // Setup minimal Git repository fixture for scan_git_repository test
+    const gitDir = path.join(fixtureDir, '.git');
+    const objectsDir = path.join(gitDir, 'objects', '12');
+    const refsHeads = path.join(gitDir, 'refs', 'heads');
+    await fs.mkdir(objectsDir, { recursive: true });
+    await fs.mkdir(refsHeads, { recursive: true });
+    await fs.writeFile(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
+    await fs.writeFile(path.join(refsHeads, 'main'), '0123456789abcdef0123456789abcdef01234567\n');
+    await fs.writeFile(
+      path.join(objectsDir, '34567890abcdef0123456789abcdef01234567'),
+      'loose-object-data',
+    );
+
     try {
       const scanResult = await client.callTool({
         name: 'scan_files',
@@ -127,6 +148,31 @@ describe('MCP Client Integration Test', () => {
       expect(sampleEntry.sizeBytes).toBe('hello world content'.length);
       expect(sampleEntry.extension).toBe('.txt');
       expect(sampleEntry.modifiedAt).toBeDefined();
+
+      // Test scan_git_repository MCP tool over HTTP
+      const gitResult = await client.callTool({
+        name: 'scan_git_repository',
+        arguments: {
+          rootPath: fixtureDir,
+        },
+      });
+
+      expect(gitResult.isError).toBeFalsy();
+      expect(gitResult.content).toBeDefined();
+      const gitContent = gitResult.content[0] as { type: string; text: string };
+      expect(gitContent.type).toBe('text');
+
+      const parsedGit = JSON.parse(gitContent.text);
+      expect(parsedGit.isRepository).toBe(true);
+      expect(parsedGit.rootPath).toBe(path.resolve(fixtureDir));
+      expect(parsedGit.gitDirectoryType).toBe('directory');
+      expect(parsedGit.branch).toBe('main');
+      expect(parsedGit.head).toBe('0123456789abcdef0123456789abcdef01234567');
+      expect(parsedGit.looseObjectCount).toBe(1);
+      expect(parsedGit.packCount).toBe(0);
+      expect(parsedGit.repositorySizeBytes).toBeGreaterThan(0);
+      expect('objectCount' in parsedGit).toBe(false);
+      expect(parsedGit.truncated).toBe(false);
     } finally {
       await fs.rm(fixtureDir, { recursive: true, force: true });
     }
