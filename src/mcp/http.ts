@@ -37,17 +37,16 @@ function parseHostnames(inputs: (string | undefined)[]): string[] {
   return Array.from(hostnames);
 }
 
+interface SessionEntry {
+  transport: NodeStreamableHTTPServerTransport;
+  server: ReturnType<typeof createServer>;
+}
+
 export async function createHttpServer(
   port: number,
   options?: HttpServerOptions,
 ): Promise<http.Server> {
-  const mcpServer = createServer();
-
-  const transport = new NodeStreamableHTTPServerTransport({
-    sessionIdGenerator: () => crypto.randomUUID(),
-  });
-
-  await mcpServer.connect(transport);
+  const sessions = new Map<string, SessionEntry>();
 
   const allowedHosts = parseHostnames([
     process.env.ALLOWED_HOSTS,
@@ -61,7 +60,7 @@ export async function createHttpServer(
   const validateHost = hostHeaderValidation(allowedHosts);
   const validateOrigin = originValidation(allowedOriginHostnames);
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     // Validate Host header for DNS rebinding protection
     if (!validateHost(req, res)) {
       return;
@@ -75,12 +74,15 @@ export async function createHttpServer(
     // Restrict CORS: only echo back validated origin when Origin header is present
     if (req.headers.origin) {
       res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
-      res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'POST, GET, DELETE, OPTIONS');
       res.setHeader(
         'Access-Control-Allow-Headers',
-        'Content-Type, Authorization, x-api-key, MCP-Protocol-Version, Mcp-Method',
+        'Content-Type, Authorization, x-api-key, MCP-Protocol-Version, Mcp-Method, mcp-session-id',
       );
-      res.setHeader('Access-Control-Expose-Headers', 'MCP-Protocol-Version, Content-Type');
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'MCP-Protocol-Version, Content-Type, mcp-session-id',
+      );
       res.setHeader('Vary', 'Origin');
     }
 
@@ -90,17 +92,126 @@ export async function createHttpServer(
       return;
     }
 
-    if (req.url && (req.url === '/mcp' || req.url.startsWith('/mcp?'))) {
-      transport.handleRequest(req, res).catch((err) => {
-        console.error('Transport error:', err);
+    if (!req.url || (req.url !== '/mcp' && !req.url.startsWith('/mcp?'))) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: {
+            code: -32601,
+            message: 'Not Found',
+          },
+          id: null,
+        }),
+      );
+      return;
+    }
+
+    const rawSessionId = req.headers['mcp-session-id'];
+    const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+
+    if (sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32001,
+              message: 'Session not found',
+            },
+            id: null,
+          }),
+        );
+        return;
+      }
+
+      try {
+        await session.transport.handleRequest(req, res);
+      } catch (err) {
+        console.error('Transport error on existing session:', err);
         if (!res.headersSent) {
-          res.writeHead(500);
-          res.end('Internal Server Error');
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: 'Internal Server Error',
+              },
+              id: null,
+            }),
+          );
         }
-      });
-    } else {
-      res.writeHead(404);
-      res.end('Not Found');
+      }
+      return;
+    }
+
+    // No session ID provided
+    if (req.method !== 'POST') {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: {
+            code: -32600,
+            message: 'Bad Request: Mcp-Session-Id header is required',
+          },
+          id: null,
+        }),
+      );
+      return;
+    }
+
+    // New initialization request: create a fresh McpServer and NodeStreamableHTTPServerTransport
+    const mcpServer = createServer();
+    const transport = new NodeStreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      onsessioninitialized: (newSessionId) => {
+        sessions.set(newSessionId, { transport, server: mcpServer });
+      },
+      onsessionclosed: (closedSessionId) => {
+        sessions.delete(closedSessionId);
+      },
+    });
+
+    transport.onclose = () => {
+      if (transport.sessionId) {
+        sessions.delete(transport.sessionId);
+      }
+    };
+
+    try {
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res);
+    } catch (err) {
+      console.error('Transport error on new session initialization:', err);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Internal Server Error',
+            },
+            id: null,
+          }),
+        );
+      }
+    }
+  });
+
+  server.on('close', async () => {
+    for (const [id, session] of sessions) {
+      sessions.delete(id);
+      try {
+        await session.transport.close();
+        await session.server.close();
+      } catch {
+        // ignore
+      }
     }
   });
 

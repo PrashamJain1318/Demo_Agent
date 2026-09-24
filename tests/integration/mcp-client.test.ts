@@ -287,4 +287,65 @@ describe('MCP Client Integration Test', () => {
     expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
     expect(res.headers.get('access-control-allow-origin')).not.toBe('*');
   });
+
+  it('supports sequential client connections (Client #1 then Client #2) without "Server already initialized"', async () => {
+    // Client #1
+    const client1 = new Client({ name: 'client-1', version: '1.0.0' }, { capabilities: {} });
+    const transport1 = new StreamableHTTPClientTransport(new URL(serverUrl));
+    await client1.connect(transport1);
+
+    const tools1 = await client1.listTools();
+    expect(tools1.tools.map((t) => t.name)).toContain('health_check');
+
+    const health1 = await client1.callTool({ name: 'health_check', arguments: {} });
+    expect(health1.content[0].type).toBe('text');
+    expect(JSON.parse((health1.content[0] as { text: string }).text).status).toBe('ok');
+
+    await client1.close();
+
+    // Client #2 with fresh StreamableHTTPClientTransport
+    const client2 = new Client({ name: 'client-2', version: '1.0.0' }, { capabilities: {} });
+    const transport2 = new StreamableHTTPClientTransport(new URL(serverUrl));
+    await client2.connect(transport2);
+
+    const tools2 = await client2.listTools();
+    expect(tools2.tools.map((t) => t.name)).toContain('health_check');
+
+    const health2 = await client2.callTool({ name: 'health_check', arguments: {} });
+    expect(health2.content[0].type).toBe('text');
+    expect(JSON.parse((health2.content[0] as { text: string }).text).status).toBe('ok');
+
+    await client2.close();
+  });
+
+  it('supports two independent clients establishing separate concurrent sessions without collision', async () => {
+    const clientA = new Client(
+      { name: 'client-concurrent-a', version: '1.0.0' },
+      { capabilities: {} },
+    );
+    const transportA = new StreamableHTTPClientTransport(new URL(serverUrl));
+    await clientA.connect(transportA);
+
+    const clientB = new Client(
+      { name: 'client-concurrent-b', version: '1.0.0' },
+      { capabilities: {} },
+    );
+    const transportB = new StreamableHTTPClientTransport(new URL(serverUrl));
+    await clientB.connect(transportB);
+
+    const [toolsA, toolsB] = await Promise.all([clientA.listTools(), clientB.listTools()]);
+
+    expect(toolsA.tools.map((t) => t.name)).toContain('health_check');
+    expect(toolsB.tools.map((t) => t.name)).toContain('health_check');
+
+    const [healthA, healthB] = await Promise.all([
+      clientA.callTool({ name: 'health_check', arguments: {} }),
+      clientB.callTool({ name: 'health_check', arguments: {} }),
+    ]);
+
+    expect(JSON.parse((healthA.content[0] as { text: string }).text).status).toBe('ok');
+    expect(JSON.parse((healthB.content[0] as { text: string }).text).status).toBe('ok');
+
+    await Promise.all([clientA.close(), clientB.close()]);
+  });
 });
