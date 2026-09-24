@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { FileScanner } from '../scanner/files/FileScanner.js';
 import { GitScanner } from '../scanner/git/GitScanner.js';
+import { DependencyScanner } from '../scanner/dependencies/DependencyScanner.js';
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -106,6 +107,61 @@ export function createServer(): McpServer {
         const result = await scanner.scan({
           rootPath: args.rootPath,
           maxEntries: args.maxEntries,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ error: message }),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'scan_dependencies',
+    {
+      description:
+        'Performs a safe, read-only inspection of Node.js project dependencies declared in package.json and installed in node_modules.',
+      inputSchema: {
+        rootPath: z.string().describe('The root directory containing package.json to scan'),
+        maxDependencies: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of declared dependency records to discover (default: 1000)'),
+        maxInstalledDependencies: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            'Maximum number of installed node_modules packages to discover (default: 1000)',
+          ),
+      },
+    },
+    async (args) => {
+      try {
+        const scanner = new DependencyScanner();
+        const result = await scanner.scan({
+          rootPath: args.rootPath,
+          maxDependencies: args.maxDependencies,
+          maxInstalledDependencies: args.maxInstalledDependencies,
         });
 
         return {

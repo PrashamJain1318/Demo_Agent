@@ -49,11 +49,12 @@ describe('MCP Client Integration Test', () => {
     // 9. Call listTools() through MCP client
     const toolsResult = await client.listTools();
 
-    // 10. Verify health_check, scan_files, and scan_git_repository exist
+    // 10. Verify health_check, scan_files, scan_git_repository, and scan_dependencies exist
     const toolNames = toolsResult.tools.map((t) => t.name);
     expect(toolNames).toContain('health_check');
     expect(toolNames).toContain('scan_files');
     expect(toolNames).toContain('scan_git_repository');
+    expect(toolNames).toContain('scan_dependencies');
 
     const healthCheckTool = toolsResult.tools.find((t) => t.name === 'health_check');
     expect(healthCheckTool).toBeDefined();
@@ -74,6 +75,13 @@ describe('MCP Client Integration Test', () => {
     expect(scanGitTool?.name).toBe('scan_git_repository');
     expect(scanGitTool?.description).toBe(
       'Performs a safe, read-only inspection of a Git repository, collecting branch, commit, and object storage metrics.',
+    );
+
+    const scanDepsTool = toolsResult.tools.find((t) => t.name === 'scan_dependencies');
+    expect(scanDepsTool).toBeDefined();
+    expect(scanDepsTool?.name).toBe('scan_dependencies');
+    expect(scanDepsTool?.description).toBe(
+      'Performs a safe, read-only inspection of Node.js project dependencies declared in package.json and installed in node_modules.',
     );
 
     // 11. Call health_check through MCP client
@@ -118,6 +126,17 @@ describe('MCP Client Integration Test', () => {
     await fs.writeFile(
       path.join(objectsDir, '34567890abcdef0123456789abcdef01234567'),
       'loose-object-data',
+    );
+
+    // Setup minimal package.json for scan_dependencies test
+    await fs.writeFile(
+      path.join(fixtureDir, 'package.json'),
+      JSON.stringify({
+        name: 'fixture-app',
+        dependencies: {
+          lodash: '^4.17.21',
+        },
+      }),
     );
 
     try {
@@ -173,6 +192,32 @@ describe('MCP Client Integration Test', () => {
       expect(parsedGit.repositorySizeBytes).toBeGreaterThan(0);
       expect('objectCount' in parsedGit).toBe(false);
       expect(parsedGit.truncated).toBe(false);
+
+      // Test scan_dependencies MCP tool over HTTP verifying both limit parameters
+      const depResult = await client.callTool({
+        name: 'scan_dependencies',
+        arguments: {
+          rootPath: fixtureDir,
+          maxDependencies: 50,
+          maxInstalledDependencies: 50,
+        },
+      });
+
+      expect(depResult.isError).toBeFalsy();
+      expect(depResult.content).toBeDefined();
+      const depContent = depResult.content[0] as { type: string; text: string };
+      expect(depContent.type).toBe('text');
+
+      const parsedDep = JSON.parse(depContent.text);
+      expect(parsedDep.manifestFound).toBe(true);
+      expect(parsedDep.manifestType).toBe('package.json');
+      expect(parsedDep.totalDependencies).toBe(1);
+      expect(parsedDep.dependencies[0]).toEqual({
+        name: 'lodash',
+        requestedVersion: '^4.17.21',
+        dependencyType: 'production',
+      });
+      expect(parsedDep.truncated).toBe(false);
     } finally {
       await fs.rm(fixtureDir, { recursive: true, force: true });
     }
