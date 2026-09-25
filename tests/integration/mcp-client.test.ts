@@ -49,12 +49,13 @@ describe('MCP Client Integration Test', () => {
     // 9. Call listTools() through MCP client
     const toolsResult = await client.listTools();
 
-    // 10. Verify health_check, scan_files, scan_git_repository, and scan_dependencies exist
+    // 10. Verify health_check, scan_files, scan_git_repository, scan_dependencies, and scan_cache exist
     const toolNames = toolsResult.tools.map((t) => t.name);
     expect(toolNames).toContain('health_check');
     expect(toolNames).toContain('scan_files');
     expect(toolNames).toContain('scan_git_repository');
     expect(toolNames).toContain('scan_dependencies');
+    expect(toolNames).toContain('scan_cache');
 
     const healthCheckTool = toolsResult.tools.find((t) => t.name === 'health_check');
     expect(healthCheckTool).toBeDefined();
@@ -82,6 +83,13 @@ describe('MCP Client Integration Test', () => {
     expect(scanDepsTool?.name).toBe('scan_dependencies');
     expect(scanDepsTool?.description).toBe(
       'Performs a safe, read-only inspection of Node.js project dependencies declared in package.json and installed in node_modules.',
+    );
+
+    const scanCacheTool = toolsResult.tools.find((t) => t.name === 'scan_cache');
+    expect(scanCacheTool).toBeDefined();
+    expect(scanCacheTool?.name).toBe('scan_cache');
+    expect(scanCacheTool?.description).toBe(
+      'Performs a safe, read-only discovery scan for common application, package manager, and framework cache directories.',
     );
 
     // 11. Call health_check through MCP client
@@ -138,6 +146,14 @@ describe('MCP Client Integration Test', () => {
         },
       }),
     );
+
+    // Setup cache directories for scan_cache test
+    const npmCache = path.join(fixtureDir, '.npm');
+    const nextCache = path.join(fixtureDir, '.next', 'cache');
+    await fs.mkdir(npmCache, { recursive: true });
+    await fs.mkdir(nextCache, { recursive: true });
+    await fs.writeFile(path.join(npmCache, 'npm-cache-data.bin'), 'npm-cache-content');
+    await fs.writeFile(path.join(nextCache, 'next-cache-data.json'), '{"next": true}');
 
     try {
       const scanResult = await client.callTool({
@@ -218,6 +234,33 @@ describe('MCP Client Integration Test', () => {
         dependencyType: 'production',
       });
       expect(parsedDep.truncated).toBe(false);
+
+      // Test scan_cache MCP tool over HTTP
+      const cacheResult = await client.callTool({
+        name: 'scan_cache',
+        arguments: {
+          rootPath: fixtureDir,
+          maxDepth: 4,
+          maxResults: 50,
+        },
+      });
+
+      expect(cacheResult.isError).toBeFalsy();
+      expect(cacheResult.content).toBeDefined();
+      const cacheContent = cacheResult.content[0] as { type: string; text: string };
+      expect(cacheContent.type).toBe('text');
+
+      const parsedCache = JSON.parse(cacheContent.text);
+      expect(parsedCache.rootPath).toBe(path.resolve(fixtureDir));
+      expect(parsedCache.caches.length).toBeGreaterThanOrEqual(2);
+      expect(parsedCache.totalCacheSizeBytes).toBeGreaterThan(0);
+      expect(parsedCache.totalCacheEntries).toBeGreaterThanOrEqual(2);
+      expect(parsedCache.truncated).toBe(false);
+
+      const npmEntry = parsedCache.caches.find((c: { type: string }) => c.type === 'npm');
+      const nextEntry = parsedCache.caches.find((c: { type: string }) => c.type === 'next');
+      expect(npmEntry).toBeDefined();
+      expect(nextEntry).toBeDefined();
     } finally {
       await fs.rm(fixtureDir, { recursive: true, force: true });
     }

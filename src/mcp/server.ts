@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { FileScanner } from '../scanner/files/FileScanner.js';
 import { GitScanner } from '../scanner/git/GitScanner.js';
 import { DependencyScanner } from '../scanner/dependencies/DependencyScanner.js';
+import { CacheScanner } from '../scanner/cache/CacheScanner.js';
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -162,6 +163,59 @@ export function createServer(): McpServer {
           rootPath: args.rootPath,
           maxDependencies: args.maxDependencies,
           maxInstalledDependencies: args.maxInstalledDependencies,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ error: message }),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'scan_cache',
+    {
+      description:
+        'Performs a safe, read-only discovery scan for common application, package manager, and framework cache directories.',
+      inputSchema: {
+        rootPath: z.string().describe('The root directory path to scan for caches'),
+        maxDepth: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Maximum directory depth to recurse (default: 6)'),
+        maxResults: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of cache entries to return (default: 100)'),
+      },
+    },
+    async (args) => {
+      try {
+        const scanner = new CacheScanner();
+        const result = await scanner.scan({
+          rootPath: args.rootPath,
+          maxDepth: args.maxDepth,
+          maxResults: args.maxResults,
         });
 
         return {

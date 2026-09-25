@@ -122,4 +122,26 @@ curl -X POST http://localhost:8000/mcp \
   }'
 ```
 
-_Note: Explicitly, real cleanup functionality does not exist yet. No filesystem access, docker commands, or dependencies are affected. TrueForge has not been connected yet._
+### Cache Scanner
+
+Digital Janitor includes a dedicated, safe, read-only cache discovery scanner exposed through the `scan_cache` MCP tool.
+
+- **Purpose**: Discovers and inspects standard cache directories created by package managers, build systems, frameworks, and operating systems.
+- **Safety**: Strictly read-only. It inspects metadata, counts entries, and measures byte usage. It does NOT delete, unlink, clean up, or mutate any files or directories.
+- **Supported Cache Types**:
+  - `npm`: `.npm` cache directory
+  - `pnpm`: `.pnpm-store` content-addressable store
+  - `yarn`: `.yarn/cache` package cache
+  - `python`: `__pycache__` compiled bytecode cache directories
+  - `next`: `.next/cache` Next.js build and page cache
+  - `vite`: `node_modules/.vite` pre-bundled dependency cache
+  - `gradle`: `.gradle/caches` dependency and build cache
+  - `macos`: `Library/Caches` user application cache (detected when scanning a user home directory)
+  - `generic`: generic cache directories explicitly named `cache`, `caches`, or `.cache`
+- **Configurable Limits**:
+  - `maxDepth`: Maximum recursion depth (default: `6`, must be a non-negative integer).
+  - `maxResults`: Maximum number of cache entry records returned (default: `100`, must be a positive integer). If reached, `truncated` is set to `true`.
+- **Double-Counting Prevention**: Nested caches (e.g. an inner cache located inside an outer cache) are tracked individually in `caches`, while `totalCacheSizeBytes` and `totalCacheEntries` are calculated only from top-level non-overlapping cache roots to prevent double-counting.
+- **Cleanup Status**: No cleanup or pruning is performed. This scanner is strictly diagnostic and analytical.
+
+_Note: Explicitly, real cleanup functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
