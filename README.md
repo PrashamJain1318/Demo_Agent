@@ -168,4 +168,49 @@ The Docker Scanner does not remove, stop, prune, modify, or execute commands ins
     Limits operate independently across categories, setting `truncated: true` if any threshold is reached.
 - **Reclaimable Storage**: Reports `totalReclaimableBytes` based strictly on explicit values reported by Docker CLI summaries (`docker system df`), without guessing or assuming all unused resources can be reclaimed.
 
+### Analyzer
+
+Digital Janitor includes an intelligence and normalization layer implemented by the `Analyzer` class.
+
+The Analyzer consumes raw results produced by scanners and converts them into normalized, deterministic findings.
+
+#### Pipeline Architecture
+
+```text
+SCAN
+  ↓
+ANALYZE (Digital Janitor Step 8 stops here)
+  ↓
+PLAN
+  ↓
+APPROVAL
+  ↓
+QUARANTINE
+  ↓
+VERIFY
+  ↓
+DELETE
+```
+
+**IMPORTANT**: Step 8 stops strictly at **ANALYZE**. The Analyzer does not remove, move, modify, or quarantine anything. No cleanup plans or delete actions are created, and no human approval or TrueForge connections are invoked.
+
+#### Key Principles
+
+- **Scanners Collect Evidence**: Scanners (`FileScanner`, `GitScanner`, `DependencyScanner`, `CacheScanner`, `DockerScanner`) collect raw factual metadata from the host environment.
+- **Analyzer Normalizes Evidence**: The Analyzer synthesizes these raw inputs into structured findings with standardized categories (`cache`, `build-artifact`, `docker`, `repository`, `dependency`, `stale`).
+- **Risk Levels**:
+  - `low`: Known regenerable build caches, active running containers, and essential repository metadata.
+  - `medium`: Inactive stopped containers, unreferenced container images, custom unattached networks, or generic caches.
+  - `high`: Unattached Docker volumes (which may contain unbacked persistent data).
+  - `critical`: Extremely rare, requiring explicit unambiguous evidence.
+- **Classification Confidence**: A value between `0.0` and `1.0` representing certainty in the category classification and evidence detection (e.g. `0.95` confidence that no containers currently reference a volume), NOT a likelihood of disposability or safe deletion.
+- **Conservative Recommendations**:
+  - `review`: Resource is a candidate for operator review.
+  - `retain`: Resource is required system or version control infrastructure (e.g. `.git`, system networks).
+  - `investigate`: Ambiguity exists (e.g. generic cache, unattached volume, or manifest inconsistency).
+  - _No destructive recommendations (such as `delete` or `prune`) exist in this layer._
+- **Deterministic Findings and IDs**: Finding IDs are generated via SHA-256 hashes of `source:category:target:title`. The same input will always produce identical findings and IDs, independent of execution time or random numbers.
+- **Storage Accounting**: `totalBytes` is calculated deterministically without double-counting nested directories or overlapping cache paths.
+- **MCP Status**: The Analyzer operates as an internal library service during Step 8 to prevent coupling scanner execution or transporting complex nested schemas over MCP before the planning layer is implemented.
+
 _Note: Explicitly, real cleanup functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
