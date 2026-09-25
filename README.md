@@ -283,4 +283,27 @@ NO APPROVAL -> NO QUARANTINE -> NO DELETE
 - **Deduplication & Deterministic Ordering**: Requested action IDs are deduplicated and all output ID lists (`approvedActionIds`, `rejectedActionIds`, `blockedActionIds`) are deterministically sorted.
 - **Architectural Boundary Enforcement (`ApprovedExecutionPayload`)**: Future execution layers (Quarantine, Executor) must receive an `ApprovedExecutionPayload` produced via `ApprovalGate.createExecutionPayload(plan, result)`. Executors must never directly receive or execute an unapproved `CleanupPlan`.
 
-_Note: Explicitly, real cleanup functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
+### Step 11: Quarantine Executor (Controlled Safe Movement)
+
+The Quarantine Executor performs the first controlled filesystem mutation in the project: moving explicitly approved file and directory cleanup actions into a safe, isolated quarantine directory.
+
+#### Safety Invariants
+
+```
+UNAPPROVED ACTION -> NO QUARANTINE -> NO FILESYSTEM MUTATION
+QUARANTINE != DELETE
+```
+
+#### Key Architecture & Guarantees
+
+- **No Permanent Deletion**: Zero `fs.rm`, zero `fs.unlink`, zero `fs.rmdir`. Only `fs.mkdir` and `fs.rename` into the quarantine vault.
+- **Architectural Input Enforcement**: Consumes ONLY `ApprovedExecutionPayload`. The executor strictly rejects raw `CleanupPlan` objects.
+- **Supported Action Types**: Only filesystem actions (`remove-file` and `remove-directory`) can be quarantined. Docker actions are skipped/rejected with safe explanatory statuses; Docker resources are never mutated.
+- **Protected Paths Enforcement**: Strictly protects root directories (`/`), user home, Desktop, Documents, Downloads, Library, system folders (`/bin`, `/sbin`, `/usr`, `/etc`), `.git` repositories, `node_modules` root directories, and `quarantineRoot` itself.
+- **Symlink Protection**: Symlinks are inspected with `lstat` and never followed or moved.
+- **Path Traversal Guards**: Verifies all source and destination paths remain within intended boundaries and prevents `..` escapes.
+- **Collision Safety**: Uses collision-free, deterministic directory layouts: `<quarantineRoot>/<manifestId>/items/<actionId>/<basename>`. Overwrites are strictly prohibited; collisions result in failed items without data loss.
+- **Deterministic Manifest**: Produces a `QuarantineManifest` with a deterministic ID (`quarantine-<hash>`) based on approved actions and the quarantine root, independent of timestamps.
+- **Dry-Run Mode**: Supports `dryRun: true` to validate paths and destinations without modifying the filesystem or creating directories.
+
+_Note: Explicitly, permanent deletion functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
