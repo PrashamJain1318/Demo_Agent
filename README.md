@@ -259,4 +259,28 @@ DELETE
 - **Deduplication of Overlapping Paths**: If a parent directory cleanup action is planned (e.g. `remove-directory` on `/app/.next/cache`), any nested child actions are deduplicated and routed to `blockedActions` to prevent redundant or conflicting operations.
 - **Deterministic Action and Plan IDs**: Action IDs and Plan IDs are calculated via SHA-256 hashes independent of system timestamps.
 
+### Step 10: Approval Gate (Execution Safety Boundary)
+
+The Approval Gate implements a deterministic, pure execution safety boundary between the `CleanupPlanner` and future execution layers (Quarantine, Verify, Delete).
+
+#### Safety Invariant
+
+```
+NO APPROVAL -> NO QUARANTINE -> NO DELETE
+```
+
+#### Key Architecture & Guarantees
+
+- **Pure and Deterministic**: Operates purely in-memory. Zero filesystem writes, zero shell execution, zero child processes, zero Docker commands, and zero network calls.
+- **Explicit Approval Only**: Actions are approved ONLY when explicitly listed in `ApprovalRequest.actionIds` and `decision === "approved"`. Unrequested actions are never automatically approved.
+- **Risk Policy Enforcement**:
+  - `low` and `medium` risk: Eligible for approval if explicitly requested.
+  - `high` risk: Rejected by default unless `allowHighRisk: true`.
+  - `critical` risk: Rejected by default unless `allowCriticalRisk: true`.
+  - High/critical risk actions are never silently downgraded.
+- **Planner Block Invariance**: Any action or source finding previously blocked by the `CleanupPlanner` is strictly blocked and cannot be approved.
+- **Plan ID Matching**: `ApprovalRequest.planId` must strictly match `CleanupPlan.id`. Mismatches reject all actions with a structured error.
+- **Deduplication & Deterministic Ordering**: Requested action IDs are deduplicated and all output ID lists (`approvedActionIds`, `rejectedActionIds`, `blockedActionIds`) are deterministically sorted.
+- **Architectural Boundary Enforcement (`ApprovedExecutionPayload`)**: Future execution layers (Quarantine, Executor) must receive an `ApprovedExecutionPayload` produced via `ApprovalGate.createExecutionPayload(plan, result)`. Executors must never directly receive or execute an unapproved `CleanupPlan`.
+
 _Note: Explicitly, real cleanup functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
