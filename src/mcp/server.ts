@@ -19,12 +19,41 @@ import type { ApprovalRequest, ApprovedExecutionPayload } from '../types/approva
 import type { QuarantineManifest } from '../types/quarantine.js';
 import type { VerificationReport } from '../types/verification.js';
 import type { DeletionRequest, ValidatedDeletionPayload } from '../types/deletion.js';
+import { isTrueForgeAllowedTool } from '../config/trueforge.js';
 
-export function createServer(): McpServer {
+export type McpServerProfile = 'full' | 'trueforge-read-only';
+
+export interface ServerOptions {
+  profile?: McpServerProfile;
+  allowedTools?: readonly string[];
+}
+
+export function createServer(options?: ServerOptions): McpServer {
   const server = new McpServer({
-    name: 'Digital Janitor',
+    name:
+      options?.profile === 'trueforge-read-only'
+        ? 'Digital Janitor (TrueForge Read-Only)'
+        : 'Digital Janitor',
     version: '0.1.0',
   });
+
+  const shouldRegister = (toolName: string): boolean => {
+    if (options?.allowedTools) {
+      return options.allowedTools.includes(toolName);
+    }
+    if (options?.profile === 'trueforge-read-only') {
+      return isTrueForgeAllowedTool(toolName);
+    }
+    return true;
+  };
+
+  const rawRegisterTool = server.registerTool.bind(server);
+  server.registerTool = ((toolName: string, ...rest: unknown[]) => {
+    if (shouldRegister(toolName)) {
+      return Reflect.apply(rawRegisterTool, server, [toolName, ...rest]);
+    }
+    return server;
+  }) as typeof server.registerTool;
 
   // =========================================================================
   // HEALTH CHECK
@@ -755,4 +784,13 @@ export function createServer(): McpServer {
   );
 
   return server;
+}
+
+/**
+ * Creates an McpServer instance pre-configured with the TrueForge read-only tool profile.
+ * Exposes strictly the 8 safe read-only tools; all execution, approval, quarantine,
+ * restoration, and deletion tools are omitted.
+ */
+export function createTrueForgeServer(): McpServer {
+  return createServer({ profile: 'trueforge-read-only' });
 }

@@ -7,9 +7,13 @@ import {
   originValidation,
 } from '@modelcontextprotocol/node';
 
+import type { McpServerProfile } from './server.js';
+
 export interface HttpServerOptions {
   allowedOrigins?: string[];
   allowedHosts?: string[];
+  profile?: McpServerProfile;
+  allowedTools?: readonly string[];
 }
 
 function parseHostnames(inputs: (string | undefined)[]): string[] {
@@ -165,7 +169,10 @@ export async function createHttpServer(
     }
 
     // New initialization request: create a fresh McpServer and NodeStreamableHTTPServerTransport
-    const mcpServer = createServer();
+    const mcpServer = createServer({
+      profile: options?.profile,
+      allowedTools: options?.allowedTools,
+    });
     const transport = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (newSessionId) => {
