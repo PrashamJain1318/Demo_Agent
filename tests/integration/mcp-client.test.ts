@@ -49,13 +49,14 @@ describe('MCP Client Integration Test', () => {
     // 9. Call listTools() through MCP client
     const toolsResult = await client.listTools();
 
-    // 10. Verify health_check, scan_files, scan_git_repository, scan_dependencies, and scan_cache exist
+    // 10. Verify health_check, scan_files, scan_git_repository, scan_dependencies, scan_cache, and scan_docker exist
     const toolNames = toolsResult.tools.map((t) => t.name);
     expect(toolNames).toContain('health_check');
     expect(toolNames).toContain('scan_files');
     expect(toolNames).toContain('scan_git_repository');
     expect(toolNames).toContain('scan_dependencies');
     expect(toolNames).toContain('scan_cache');
+    expect(toolNames).toContain('scan_docker');
 
     const healthCheckTool = toolsResult.tools.find((t) => t.name === 'health_check');
     expect(healthCheckTool).toBeDefined();
@@ -90,6 +91,13 @@ describe('MCP Client Integration Test', () => {
     expect(scanCacheTool?.name).toBe('scan_cache');
     expect(scanCacheTool?.description).toBe(
       'Performs a safe, read-only discovery scan for common application, package manager, and framework cache directories.',
+    );
+
+    const scanDockerTool = toolsResult.tools.find((t) => t.name === 'scan_docker');
+    expect(scanDockerTool).toBeDefined();
+    expect(scanDockerTool?.name).toBe('scan_docker');
+    expect(scanDockerTool?.description).toBe(
+      'Performs a safe, read-only inventory of Docker containers, images, volumes, networks, and build cache.',
     );
 
     // 11. Call health_check through MCP client
@@ -261,6 +269,37 @@ describe('MCP Client Integration Test', () => {
       const nextEntry = parsedCache.caches.find((c: { type: string }) => c.type === 'next');
       expect(npmEntry).toBeDefined();
       expect(nextEntry).toBeDefined();
+
+      // Test scan_docker MCP tool over HTTP
+      const dockerResult = await client.callTool({
+        name: 'scan_docker',
+        arguments: {
+          maxContainers: 10,
+          maxImages: 10,
+        },
+      });
+
+      expect(dockerResult.isError).toBeFalsy();
+      expect(dockerResult.content).toBeDefined();
+      const dockerContent = dockerResult.content[0] as { type: string; text: string };
+      expect(dockerContent.type).toBe('text');
+
+      const parsedDocker = JSON.parse(dockerContent.text);
+      expect(typeof parsedDocker.dockerAvailable).toBe('boolean');
+      expect(Array.isArray(parsedDocker.containers)).toBe(true);
+      expect(Array.isArray(parsedDocker.images)).toBe(true);
+      expect(Array.isArray(parsedDocker.volumes)).toBe(true);
+      expect(Array.isArray(parsedDocker.networks)).toBe(true);
+      expect(Array.isArray(parsedDocker.buildCache)).toBe(true);
+      expect(typeof parsedDocker.totalReclaimableBytes).toBe('number');
+      expect(Array.isArray(parsedDocker.warnings)).toBe(true);
+      expect(typeof parsedDocker.truncated).toBe('boolean');
+
+      if (!parsedDocker.dockerAvailable) {
+        expect(parsedDocker.warnings.length).toBeGreaterThan(0);
+        expect(typeof parsedDocker.warnings[0]).toBe('string');
+        expect(parsedDocker.warnings[0].toLowerCase()).toContain('docker');
+      }
     } finally {
       await fs.rm(fixtureDir, { recursive: true, force: true });
     }

@@ -144,4 +144,28 @@ Digital Janitor includes a dedicated, safe, read-only cache discovery scanner ex
 - **Double-Counting Prevention**: Nested caches (e.g. an inner cache located inside an outer cache) are tracked individually in `caches`, while `totalCacheSizeBytes` and `totalCacheEntries` are calculated only from top-level non-overlapping cache roots to prevent double-counting.
 - **Cleanup Status**: No cleanup or pruning is performed. This scanner is strictly diagnostic and analytical.
 
+### Docker Scanner
+
+Digital Janitor includes a safe, read-only Docker inventory scanner exposed through the `scan_docker` MCP tool.
+
+The Docker Scanner does not remove, stop, prune, modify, or execute commands inside Docker resources.
+
+- **Read-Only Docker Inventory**: Scans and catalogs existing Docker resources on the host system without making any modifications.
+- **Resources Discovered**:
+  - **Containers**: Discovers running and stopped containers (identifying stopped containers neutrally as candidates for review).
+  - **Images**: Inventories repository, tag, size, and container associations (identifying unused images as candidates for review).
+  - **Volumes**: Discovers driver/volume records and references without mounting volumes or accessing files within them.
+  - **Networks**: Catalogs network names, drivers, scopes, and attached container counts, while preserving default system networks.
+  - **Build Cache**: Reads build cache storage metrics via read-only system summary commands without pruning.
+- **Docker Unavailable Handling**: Gracefully detects when the Docker CLI is missing or the Docker daemon is unreachable. It returns a structured result with `dockerAvailable: false` and explanatory warnings rather than failing or exposing raw errors.
+- **Timeout Protection**: All direct Docker CLI invocations enforce a strict 10-second timeout per command with safe process termination, preventing hanging commands.
+- **Independent Limits**:
+  - `maxContainers` (default: 100)
+  - `maxImages` (default: 100)
+  - `maxVolumes` (default: 100)
+  - `maxNetworks` (default: 100)
+  - `maxBuildCacheEntries` (default: 100)
+    Limits operate independently across categories, setting `truncated: true` if any threshold is reached.
+- **Reclaimable Storage**: Reports `totalReclaimableBytes` based strictly on explicit values reported by Docker CLI summaries (`docker system df`), without guessing or assuming all unused resources can be reclaimed.
+
 _Note: Explicitly, real cleanup functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._

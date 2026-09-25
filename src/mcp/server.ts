@@ -4,6 +4,7 @@ import { FileScanner } from '../scanner/files/FileScanner.js';
 import { GitScanner } from '../scanner/git/GitScanner.js';
 import { DependencyScanner } from '../scanner/dependencies/DependencyScanner.js';
 import { CacheScanner } from '../scanner/cache/CacheScanner.js';
+import { DockerScanner } from '../scanner/docker/DockerScanner.js';
 
 export function createServer(): McpServer {
   const server = new McpServer({
@@ -216,6 +217,83 @@ export function createServer(): McpServer {
           rootPath: args.rootPath,
           maxDepth: args.maxDepth,
           maxResults: args.maxResults,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ error: message }),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'scan_docker',
+    {
+      description:
+        'Performs a safe, read-only inventory of Docker containers, images, volumes, networks, and build cache.',
+      inputSchema: {
+        includeStopped: z
+          .boolean()
+          .optional()
+          .describe('Include stopped containers in scan (default: true)'),
+        maxContainers: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of container records to return (default: 100)'),
+        maxImages: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of image records to return (default: 100)'),
+        maxVolumes: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of volume records to return (default: 100)'),
+        maxNetworks: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of network records to return (default: 100)'),
+        maxBuildCacheEntries: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of build cache records to return (default: 100)'),
+      },
+    },
+    async (args) => {
+      try {
+        const scanner = new DockerScanner();
+        const result = await scanner.scan({
+          includeStopped: args.includeStopped,
+          maxContainers: args.maxContainers,
+          maxImages: args.maxImages,
+          maxVolumes: args.maxVolumes,
+          maxNetworks: args.maxNetworks,
+          maxBuildCacheEntries: args.maxBuildCacheEntries,
         });
 
         return {
