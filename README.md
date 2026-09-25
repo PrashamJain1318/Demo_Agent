@@ -335,4 +335,46 @@ ONLY A VALID QUARANTINE MANIFEST -> CAN BE VERIFIED / RESTORED
   - Symlink Safety: Refuses to restore if either the quarantine source or the destination is a symbolic link.
   - Zero permanent deletion: Uses only `fs.rename` and `fs.mkdir`. No `fs.rm`, `fs.unlink`, `fs.rmdir`.
 
-_Note: Explicitly, permanent deletion functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
+### Step 13: Permanent Deletion Safety Boundary
+
+The Permanent Deletion Safety Boundary introduces the final, strictly controlled deletion gate and executor. Permanent deletion is restricted to explicitly verified, intact items residing within the quarantine vault.
+
+#### Critical Safety Invariants
+
+Permanent deletion requires ALL of the following conditions:
+
+1. Valid `QuarantineManifest`
+2. Explicit final deletion approval (`decision: "approved"`)
+3. Explicit action IDs
+4. Item exists in quarantine
+5. Item status is "quarantined"
+6. Latest verification status is "intact"
+7. Verification must correspond to the same manifest
+8. Verification must correspond to the same quarantine path
+9. No restore has occurred
+10. No destination collision exists
+11. Protected-path validation passes
+12. Action type is filesystem-only (`remove-file` or `remove-directory`)
+13. No Docker actions
+14. No path traversal
+15. No symlink escape
+16. Final deletion request matches the verified item exactly
+
+_If ANY condition fails: NO DELETE._
+
+#### Key Architecture & Guarantees
+
+- **Final Delete Approval Gate (`DeletionGate`)**:
+  - Pure & Side-Effect Free: Evaluates manifest, verification report, and deletion request without modifying the filesystem.
+  - Stale Verification Protection: Verifies that the recorded quarantine hash matches the verified hash.
+  - Produces a strongly-typed `ValidatedDeletionPayload` containing only eligible items.
+  - Rejects unapproved, missing, modified, inaccessible, invalid, or restored items.
+- **Deletion Executor (`DeletionExecutor`)**:
+  - Boundary Enforcement: Consumes ONLY `ValidatedDeletionPayload` from `DeletionGate`; refuses raw plans, manifests, or arbitrary file paths.
+  - Last-Moment Integrity Check (Race-Safety): Recalculates the SHA-256 hash immediately before deletion and compares against the verified hash. If modified, deletion is aborted.
+  - Symlink Safety: Strictly refuses to delete symbolic links.
+  - Protected Paths: Protects filesystem roots, user home, system folders, Git metadata, and `quarantineRoot` itself.
+  - Deletion APIs: Only Node `fs.promises.unlink` for files and `fs.promises.rm` for directories on verified quarantine paths. Zero shell execution, zero child processes, zero Docker commands.
+  - Dry-Run Mode: Supports `dryRun: true` performing complete validation and last-moment hashing without deleting anything.
+
+_Note: TrueForge integration has not been connected yet._
