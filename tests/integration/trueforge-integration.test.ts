@@ -139,7 +139,125 @@ describe('TrueForge Read-Only Integration MCP Test (Step 15.1)', () => {
     ).rejects.toThrow();
   });
 
-  it('preserves session isolation under the TrueForge read-only profile', async () => {
+  it('E. proves no credentials or secrets are required by this local configuration', async () => {
+    // Normal connection with empty capabilities and no auth headers succeeds
+    const unauthenticatedClient = new Client(
+      { name: 'unauthenticated-local-client', version: '0.1.0' },
+      { capabilities: {} },
+    );
+    const unauthTransport = new StreamableHTTPClientTransport(new URL(serverUrl));
+    await unauthenticatedClient.connect(unauthTransport);
+
+    const tools = await unauthenticatedClient.listTools();
+    expect(tools.tools).toHaveLength(8);
+
+    const health = await unauthenticatedClient.callTool({
+      name: 'health_check',
+      arguments: {},
+    });
+    expect(health.isError).toBeFalsy();
+
+    await unauthenticatedClient.close();
+  });
+
+  it('B. starting HTTP server without a profile preserves the existing full tool set (14 tools)', async () => {
+    // Start fresh server with default settings (no profile specified)
+    const defaultServer = await createHttpServer(0);
+    const addr = defaultServer.address() as AddressInfo;
+    const defaultUrl = `http://localhost:${addr.port}/mcp`;
+
+    const defaultClient = new Client(
+      { name: 'default-profile-tester', version: '0.1.0' },
+      { capabilities: {} },
+    );
+    const defaultTransport = new StreamableHTTPClientTransport(new URL(defaultUrl));
+    await defaultClient.connect(defaultTransport);
+
+    try {
+      const listResult = await defaultClient.listTools();
+      const toolNames = listResult.tools.map((t) => t.name);
+
+      // Full server must contain all 14 tools
+      expect(toolNames).toHaveLength(14);
+      expect(toolNames).toContain('health_check');
+      expect(toolNames).toContain('quarantine_approved');
+      expect(toolNames).toContain('delete_verified');
+      expect(toolNames).toContain('evaluate_cleanup_approval');
+      expect(toolNames).toContain('restore_quarantine');
+      expect(toolNames).toContain('evaluate_deletion');
+      expect(toolNames).toContain('verify_quarantine');
+    } finally {
+      await defaultClient.close();
+      defaultServer.closeAllConnections?.();
+      await new Promise<void>((resolve, reject) => {
+        defaultServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  it('F. starting HTTP server with MCP_PROFILE=trueforge-read-only environment variable exposes exactly 8 tools', async () => {
+    const originalEnv = process.env.MCP_PROFILE;
+    process.env.MCP_PROFILE = 'trueforge-read-only';
+
+    let envServer: http.Server | undefined;
+    let envClient: Client | undefined;
+
+    try {
+      envServer = await createHttpServer(0);
+      const addr = envServer.address() as AddressInfo;
+      const envUrl = `http://localhost:${addr.port}/mcp`;
+
+      envClient = new Client(
+        { name: 'env-profile-tester', version: '0.1.0' },
+        { capabilities: {} },
+      );
+      const envTransport = new StreamableHTTPClientTransport(new URL(envUrl));
+      await envClient.connect(envTransport);
+
+      const listResult = await envClient.listTools();
+      const toolNames = listResult.tools.map((t) => t.name);
+
+      expect(toolNames).toHaveLength(8);
+      expect(toolNames.sort()).toEqual([...TRUEFORGE_READ_ONLY_TOOLS].sort());
+      for (const excluded of TRUEFORGE_EXCLUDED_TOOLS) {
+        expect(toolNames).not.toContain(excluded);
+      }
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.MCP_PROFILE;
+      } else {
+        process.env.MCP_PROFILE = originalEnv;
+      }
+      if (envClient) {
+        await envClient.close();
+      }
+      if (envServer) {
+        envServer.closeAllConnections?.();
+        await new Promise<void>((resolve, reject) => {
+          envServer.close((err) => (err ? reject(err) : resolve()));
+        });
+      }
+    }
+  });
+
+  it('G. strictly rejects invalid MCP_PROFILE environment variable with descriptive error', async () => {
+    const originalEnv = process.env.MCP_PROFILE;
+    process.env.MCP_PROFILE = 'invalid-override-profile';
+
+    try {
+      await expect(createHttpServer(0)).rejects.toThrow(
+        /Invalid MCP_PROFILE environment variable/i,
+      );
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.MCP_PROFILE;
+      } else {
+        process.env.MCP_PROFILE = originalEnv;
+      }
+    }
+  });
+
+  it('C. preserves session isolation under the TrueForge read-only profile', async () => {
     const clientB = new Client(
       { name: 'trueforge-client-b', version: '0.1.0' },
       { capabilities: {} },

@@ -6,8 +6,9 @@ import {
   isTrueForgeAllowedTool,
 } from '../../src/config/trueforge.js';
 import { createServer, createTrueForgeServer } from '../../src/mcp/server.js';
+import { parseProfile } from '../../src/mcp/http.js';
 
-describe('TrueForge Read-Only Profile & Allowlist (Step 15.1)', () => {
+describe('TrueForge Read-Only Profile & Allowlist (Step 15.1 & 15.3A)', () => {
   it('4. contains exactly the 8 approved read-only tools in TRUEFORGE_READ_ONLY_TOOLS', () => {
     expect(TRUEFORGE_READ_ONLY_TOOLS).toHaveLength(8);
     expect([...TRUEFORGE_READ_ONLY_TOOLS]).toEqual([
@@ -66,6 +67,39 @@ describe('TrueForge Read-Only Profile & Allowlist (Step 15.1)', () => {
     expect(isTrueForgeAllowedTool('execute_shell')).toBe(false);
     expect(isTrueForgeAllowedTool('run_command')).toBe(false);
     expect(isTrueForgeAllowedTool('rm')).toBe(false);
+  });
+
+  it('parseProfile strictly validates environment and options profiles', () => {
+    // Unset returns undefined (defaulting to full)
+    expect(parseProfile(undefined, undefined)).toBeUndefined();
+    expect(parseProfile('', undefined)).toBeUndefined();
+
+    // Valid profiles
+    expect(parseProfile('trueforge-read-only')).toBe('trueforge-read-only');
+    expect(parseProfile('  TRUEFORGE-READ-ONLY  ')).toBe('trueforge-read-only');
+    expect(parseProfile('full')).toBe('full');
+    expect(parseProfile(undefined, 'trueforge-read-only')).toBe('trueforge-read-only');
+    expect(parseProfile(undefined, 'full')).toBe('full');
+
+    // Options take precedence over env
+    expect(parseProfile('full', 'trueforge-read-only')).toBe('trueforge-read-only');
+
+    // Invalid env values throw descriptive error
+    expect(() => parseProfile('invalid-profile')).toThrow(
+      /Invalid MCP_PROFILE environment variable/i,
+    );
+    expect(() => parseProfile('delete_all')).toThrow(/Invalid MCP_PROFILE environment variable/i);
+    expect(() => parseProfile('arbitrary_tool')).toThrow(
+      /Invalid MCP_PROFILE environment variable/i,
+    );
+
+    // Invalid option values throw descriptive error
+    expect(() =>
+      parseProfile(
+        undefined,
+        'bad-profile' as unknown as import('../../src/mcp/server.js').McpServerProfile,
+      ),
+    ).toThrow(/Invalid server profile/i);
   });
 
   it('createTrueForgeServer creates an McpServer instance with only the 8 read-only tools', async () => {

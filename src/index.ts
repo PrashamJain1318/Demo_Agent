@@ -16,7 +16,8 @@ async function main() {
 
   try {
     await createHttpServer(port);
-    console.log(`Digital Janitor MCP server listening on http://localhost:${port}/mcp`);
+    const profile = process.env.MCP_PROFILE ? ` [profile: ${process.env.MCP_PROFILE}]` : '';
+    console.log(`Digital Janitor MCP server listening on http://localhost:${port}/mcp${profile}`);
   } catch (err) {
     console.error('Failed to start server:', err);
     process.exit(1);

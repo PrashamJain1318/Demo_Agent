@@ -16,6 +16,32 @@ export interface HttpServerOptions {
   allowedTools?: readonly string[];
 }
 
+const VALID_PROFILES = new Set<string>(['full', 'trueforge-read-only']);
+
+export function parseProfile(
+  envVal?: string,
+  optionVal?: McpServerProfile,
+): McpServerProfile | undefined {
+  if (optionVal !== undefined) {
+    if (!VALID_PROFILES.has(optionVal)) {
+      throw new Error(
+        `Invalid server profile: '${optionVal}'. Valid profiles are: ${Array.from(VALID_PROFILES).join(', ')}`,
+      );
+    }
+    return optionVal;
+  }
+  if (envVal !== undefined && envVal.trim() !== '') {
+    const trimmed = envVal.trim().toLowerCase();
+    if (!VALID_PROFILES.has(trimmed)) {
+      throw new Error(
+        `Invalid MCP_PROFILE environment variable: '${envVal}'. Valid profiles are: ${Array.from(VALID_PROFILES).join(', ')}`,
+      );
+    }
+    return trimmed as McpServerProfile;
+  }
+  return undefined;
+}
+
 function parseHostnames(inputs: (string | undefined)[]): string[] {
   const hostnames = new Set<string>(['localhost', '127.0.0.1', '[::1]']);
   for (const input of inputs) {
@@ -50,6 +76,7 @@ export async function createHttpServer(
   port: number,
   options?: HttpServerOptions,
 ): Promise<http.Server> {
+  const activeProfile = parseProfile(process.env.MCP_PROFILE, options?.profile);
   const sessions = new Map<string, SessionEntry>();
 
   const allowedHosts = parseHostnames([
@@ -170,7 +197,7 @@ export async function createHttpServer(
 
     // New initialization request: create a fresh McpServer and NodeStreamableHTTPServerTransport
     const mcpServer = createServer({
-      profile: options?.profile,
+      profile: activeProfile,
       allowedTools: options?.allowedTools,
     });
     const transport = new NodeStreamableHTTPServerTransport({
