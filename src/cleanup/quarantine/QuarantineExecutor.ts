@@ -9,6 +9,7 @@ import type {
   QuarantineItem,
   QuarantineManifest,
 } from '../../types/quarantine.js';
+import { hashPath } from '../../utils/hash.js';
 
 export const QUARANTINE_EXECUTOR_VERSION = '1.0.0';
 
@@ -288,6 +289,7 @@ export class QuarantineExecutor {
     try {
       await fs.promises.mkdir(quarantineItemDir, { recursive: true });
       await fs.promises.rename(normalizedSource, normalizedDest);
+      const originalSha256 = await hashPath(normalizedDest);
 
       return {
         actionId: action.id,
@@ -297,6 +299,7 @@ export class QuarantineExecutor {
         status: 'quarantined',
         originalSizeBytes:
           action.estimatedBytes ?? (sourceStat.isFile() ? sourceStat.size : undefined),
+        originalSha256,
       };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);

@@ -306,4 +306,33 @@ QUARANTINE != DELETE
 - **Deterministic Manifest**: Produces a `QuarantineManifest` with a deterministic ID (`quarantine-<hash>`) based on approved actions and the quarantine root, independent of timestamps.
 - **Dry-Run Mode**: Supports `dryRun: true` to validate paths and destinations without modifying the filesystem or creating directories.
 
+### Step 12: Quarantine Verification & Restore (Reversible Quarantine)
+
+The Quarantine Verification and Restore layer makes the quarantine subsystem deterministic, verifiable, and completely reversible.
+
+#### Safety Invariants
+
+```
+VERIFY != DELETE
+RESTORE != DELETE
+ONLY A VALID QUARANTINE MANIFEST -> CAN BE VERIFIED / RESTORED
+```
+
+#### Key Architecture & Guarantees
+
+- **Read-Only Verifier (`QuarantineVerifier`)**:
+  - Verification is strictly read-only: zero file modifications, zero renames, zero directory creations, zero deletions.
+  - Consumes ONLY `QuarantineManifest`, rejecting raw plans.
+  - Validates manifest integrity: verifies manifest ID, detects duplicate action IDs, guards against path traversals and escaping `quarantineRoot`.
+  - Content Hashing: Computes streamed SHA-256 for files and deterministic sorted representations for directories (recursively hashing files without traversing symlinks outside).
+  - Categorizes items into `intact`, `modified`, `missing`, `inaccessible`, or `invalid`.
+- **Safe Restorer (`QuarantineRestorer`)**:
+  - Explicit Action IDs Only: Requires an explicit list of action IDs to restore. Unrequested items are never restored.
+  - Never Overwrites Existing Destinations: If the original destination already exists, restore fails safely without overwriting.
+  - Protected Path Guards: Blocks restoration to root directories (`/`), user home, Desktop, Documents, Downloads, Library, system folders, Git metadata, `node_modules` root, or inside `quarantineRoot`.
+  - Re-creates Missing Parent Directories: Creates only required parent directories for original paths after all validations succeed.
+  - Post-Restore Verification: Validates restored content hash and size against recorded quarantine metadata immediately after restoration.
+  - Symlink Safety: Refuses to restore if either the quarantine source or the destination is a symbolic link.
+  - Zero permanent deletion: Uses only `fs.rename` and `fs.mkdir`. No `fs.rm`, `fs.unlink`, `fs.rmdir`.
+
 _Note: Explicitly, permanent deletion functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._

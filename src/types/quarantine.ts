@@ -9,6 +9,7 @@ export interface QuarantineItem {
   actionType: CleanupActionType;
   status: QuarantineStatus;
   originalSizeBytes?: number;
+  originalSha256?: string;
   error?: string;
 }
 
