@@ -377,4 +377,50 @@ _If ANY condition fails: NO DELETE._
   - Deletion APIs: Only Node `fs.promises.unlink` for files and `fs.promises.rm` for directories on verified quarantine paths. Zero shell execution, zero child processes, zero Docker commands.
   - Dry-Run Mode: Supports `dryRun: true` performing complete validation and last-moment hashing without deleting anything.
 
-_Note: TrueForge integration has not been connected yet._
+### Step 14: MCP Orchestration Layer
+
+The MCP Orchestration Layer exposes Digital Janitor's end-to-end capabilities through a safe, typed MCP (Model Context Protocol) interface designed for future TrueForge agent orchestration.
+
+#### Architectural Principles & Safety Invariants
+
+- **Safety Boundary Orchestration (No Bypasses)**:
+  - Every MCP tool wraps its corresponding internal application component (`FileScanner`, `GitScanner`, `DependencyScanner`, `CacheScanner`, `DockerScanner`, `Analyzer`, `CleanupPlanner`, `ApprovalGate`, `QuarantineExecutor`, `QuarantineVerifier`, `QuarantineRestorer`, `DeletionGate`, `DeletionExecutor`).
+  - No tool implements its own safety logic or bypasses the established safety gates.
+- **No Unrestricted Filesystem or Shell Tools**:
+  - Does NOT expose arbitrary file or shell tools (`read_file`, `write_file`, `delete_file`, `move_file`, `execute_shell`, `run_command`).
+  - Does NOT expose public Docker mutation commands.
+- **Strict Input Validation & Typed Schemas**:
+  - All tools define comprehensive Zod schemas that reject malformed inputs, arbitrary JSON blobs, path escapes, and unapproved payload structures.
+- **No Global or Mutable Approval State**:
+  - Per-request validation is strictly enforced; one request cannot implicitly authorize another.
+- **Session Isolation**:
+  - Maintains per-session MCP server instances and transport isolation over Streamable HTTP (`/mcp`), preventing session crosstalk or "Server already initialized" errors.
+
+#### Exposed MCP Tools
+
+1. **Read-Only Scanners**:
+   - `scan_files`: Safe, read-only filesystem discovery scan under a specified root directory.
+   - `scan_git_repository`: Safe, read-only Git repository inspection (branch, head, objects, pack metrics).
+   - `scan_dependencies`: Safe, read-only Node.js `package.json` and `node_modules` dependency inspection.
+   - `scan_cache`: Safe, read-only discovery of application, package manager, and framework caches.
+   - `scan_docker`: Safe, read-only inventory of Docker containers, images, volumes, networks, and build cache.
+2. **Analysis**:
+   - `analyze_cleanup`: Deterministic intelligence layer analyzing scan results and producing structured findings with risk levels.
+3. **Planning**:
+   - `create_cleanup_plan`: Generates a proposed `CleanupPlan` distinguishing proposed actions from blocked actions (Git metadata, Docker volumes, protected paths).
+4. **Approval**:
+   - `evaluate_cleanup_approval`: Pure, read-only approval gate validating plan IDs, risk policies, and producing an `ApprovedExecutionPayload`.
+5. **Quarantine**:
+   - `quarantine_approved`: Moves approved items into the quarantine vault. Strictly consumes `ApprovedExecutionPayload` (rejects raw `CleanupPlan`).
+6. **Verification**:
+   - `verify_quarantine`: Read-only SHA-256 and directory-tree integrity verification of quarantined items.
+7. **Restore**:
+   - `restore_quarantine`: Restores explicitly requested action IDs from quarantine back to original locations without overwriting destinations.
+8. **Deletion Approval**:
+   - `evaluate_deletion`: Pure final deletion gate validating manifest, verification report, and deletion request.
+9. **Permanent Deletion**:
+   - `delete_verified`: Permanently deletes verified quarantine items with last-moment SHA-256 race-check. Strictly consumes `ValidatedDeletionPayload`.
+10. **Diagnostics**:
+    - `health_check`: MCP service health probe.
+
+_Note: TrueForge integration has not been connected yet. Step 14 is strictly the local MCP orchestration layer._

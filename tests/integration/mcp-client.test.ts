@@ -49,7 +49,7 @@ describe('MCP Client Integration Test', () => {
     // 9. Call listTools() through MCP client
     const toolsResult = await client.listTools();
 
-    // 10. Verify health_check, scan_files, scan_git_repository, scan_dependencies, scan_cache, and scan_docker exist
+    // 10. Verify health_check, scan_files, scan_git_repository, scan_dependencies, scan_cache, scan_docker, analyze_cleanup, create_cleanup_plan, evaluate_cleanup_approval, quarantine_approved, verify_quarantine, restore_quarantine, evaluate_deletion, delete_verified exist
     const toolNames = toolsResult.tools.map((t) => t.name);
     expect(toolNames).toContain('health_check');
     expect(toolNames).toContain('scan_files');
@@ -57,6 +57,14 @@ describe('MCP Client Integration Test', () => {
     expect(toolNames).toContain('scan_dependencies');
     expect(toolNames).toContain('scan_cache');
     expect(toolNames).toContain('scan_docker');
+    expect(toolNames).toContain('analyze_cleanup');
+    expect(toolNames).toContain('create_cleanup_plan');
+    expect(toolNames).toContain('evaluate_cleanup_approval');
+    expect(toolNames).toContain('quarantine_approved');
+    expect(toolNames).toContain('verify_quarantine');
+    expect(toolNames).toContain('restore_quarantine');
+    expect(toolNames).toContain('evaluate_deletion');
+    expect(toolNames).toContain('delete_verified');
 
     const healthCheckTool = toolsResult.tools.find((t) => t.name === 'health_check');
     expect(healthCheckTool).toBeDefined();
@@ -98,6 +106,42 @@ describe('MCP Client Integration Test', () => {
     expect(scanDockerTool?.name).toBe('scan_docker');
     expect(scanDockerTool?.description).toBe(
       'Performs a safe, read-only inventory of Docker containers, images, volumes, networks, and build cache.',
+    );
+
+    const analyzeTool = toolsResult.tools.find((t) => t.name === 'analyze_cleanup');
+    expect(analyzeTool).toBeDefined();
+    expect(analyzeTool?.description).toContain('Analyzes scan results');
+
+    const planTool = toolsResult.tools.find((t) => t.name === 'create_cleanup_plan');
+    expect(planTool).toBeDefined();
+    expect(planTool?.description).toContain('Transforms structured analyzer findings');
+
+    const approvalTool = toolsResult.tools.find((t) => t.name === 'evaluate_cleanup_approval');
+    expect(approvalTool).toBeDefined();
+    expect(approvalTool?.description).toContain('Evaluates an explicit approval request');
+
+    const quarantineTool = toolsResult.tools.find((t) => t.name === 'quarantine_approved');
+    expect(quarantineTool).toBeDefined();
+    expect(quarantineTool?.description).toContain(
+      'Moves explicitly approved file and directory cleanup actions',
+    );
+
+    const verifyTool = toolsResult.tools.find((t) => t.name === 'verify_quarantine');
+    expect(verifyTool).toBeDefined();
+    expect(verifyTool?.description).toContain('Performs safe, read-only verification');
+
+    const restoreTool = toolsResult.tools.find((t) => t.name === 'restore_quarantine');
+    expect(restoreTool).toBeDefined();
+    expect(restoreTool?.description).toContain('Restores explicitly specified action IDs');
+
+    const evalDelTool = toolsResult.tools.find((t) => t.name === 'evaluate_deletion');
+    expect(evalDelTool).toBeDefined();
+    expect(evalDelTool?.description).toContain('Pure, side-effect free final deletion gate');
+
+    const deleteTool = toolsResult.tools.find((t) => t.name === 'delete_verified');
+    expect(deleteTool).toBeDefined();
+    expect(deleteTool?.description).toContain(
+      'Permanently deletes explicitly verified and approved quarantine items',
     );
 
     // 11. Call health_check through MCP client
