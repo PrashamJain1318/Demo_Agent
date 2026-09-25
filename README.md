@@ -213,4 +213,50 @@ DELETE
 - **Storage Accounting**: `totalBytes` is calculated deterministically without double-counting nested directories or overlapping cache paths.
 - **MCP Status**: The Analyzer operates as an internal library service during Step 8 to prevent coupling scanner execution or transporting complex nested schemas over MCP before the planning layer is implemented.
 
+### Cleanup Planner
+
+Digital Janitor includes a safe, deterministic planning layer implemented by the `CleanupPlanner` class.
+
+The Planner converts `AnalyzerResult` findings into a structured, proposed `CleanupPlan`.
+
+#### Pipeline Architecture
+
+```text
+SCAN
+  ↓
+ANALYZE
+  ↓
+PLAN (Digital Janitor Step 9 stops here)
+  ↓
+APPROVAL
+  ↓
+QUARANTINE
+  ↓
+VERIFY
+  ↓
+DELETE
+```
+
+**IMPORTANT**: STEP 9 creates plans only. No cleanup action is executed. The Planner does not delete, move, rename, quarantine, or execute anything.
+
+#### Key Principles
+
+- **Proposed Actions Only**: Analyzer findings are converted into proposed actions (`CleanupAction`) specifying the action type (`remove-directory`, `remove-file`, `docker-remove-container`, etc.), target, and estimated storage bytes.
+- **Mandatory Human Approval**: Every generated action enforces `requiresApproval: true`, and every plan enforces `requiresHumanApproval: true`. No action is ever pre-approved.
+- **Risk Filtering**:
+  - `low` risk findings: Included by default.
+  - `medium` risk findings: Included by default.
+  - `high` risk findings: Excluded by default.
+  - `critical` risk findings: Excluded by default.
+    Excluded findings are captured in `blockedActions` with clear explanatory reasons.
+- **Critical Docker Safety**: Unattached Docker volumes are **never** directly planned for removal in Step 9. Because volumes can contain persistent application databases or critical data, volume findings are strictly routed to `blockedActions` requiring explicit investigation.
+- **Protected System and Workspace Infrastructure**:
+  - Git repository metadata (`.git`) is strictly protected and blocked.
+  - Entire parent roots (`/`, `.git`, `node_modules`) are protected. Specific known cache subdirectories (such as `node_modules/.vite` or `.next/cache`) are eligible.
+  - Generic cache directories (`cache`, `caches`, `.cache`) require investigation and are blocked.
+  - Running Docker containers, referenced images, and default Docker system networks (`bridge`, `host`, `none`) are blocked.
+  - Dependency findings do not generate package removal commands.
+- **Deduplication of Overlapping Paths**: If a parent directory cleanup action is planned (e.g. `remove-directory` on `/app/.next/cache`), any nested child actions are deduplicated and routed to `blockedActions` to prevent redundant or conflicting operations.
+- **Deterministic Action and Plan IDs**: Action IDs and Plan IDs are calculated via SHA-256 hashes independent of system timestamps.
+
 _Note: Explicitly, real cleanup functionality does not exist yet. No filesystem deletion, docker commands, or dependency changes are performed. TrueForge has not been connected yet._
