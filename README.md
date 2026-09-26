@@ -424,3 +424,7 @@ The MCP Orchestration Layer exposes Digital Janitor's end-to-end capabilities th
     - `health_check`: MCP service health probe.
 
 _Note: TrueForge integration has not been connected yet. Step 14 is strictly the local MCP orchestration layer._
+
+Images of my Demo trueforge
+<img width="1600" height="1041" alt="image" src="https://github.com/user-attachments/assets/a4acd576-992b-4e37-b7d1-5747bb3b12d3" />
+
